@@ -18,9 +18,10 @@ torchvision>=0.16.0
 thefuzz[speedup]>=0.20.0
 python-Levenshtein>=0.23.0
 
-# Live Camera (WebRTC)
+# Live Camera (WebRTC) + Bugfix for aioice Exception Handler
 streamlit-webrtc>=0.47.0
 av>=10.0.0
+aioice<0.9.0
 
 # Model Weights Auto-Download
 huggingface_hub>=0.20.0
