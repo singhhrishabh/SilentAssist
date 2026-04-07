@@ -15,6 +15,9 @@
 """
 
 import os
+# Enable fallback to CPU for operations not natively supported by Apple Silicon MPS (like max_pool3d)
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
 import string
 import torch
 import torch.nn as nn

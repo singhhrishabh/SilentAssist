@@ -33,7 +33,8 @@ from processor import (
     MAX_FRAMES,
 )
 from model import load_model, get_device, ctc_greedy_decode, demo_inference
-from decoder import hybrid_decode, COMMAND_PALETTE
+from decoder import decode_intent
+from executor import execute_tool_call
 
 # ══════════════════════════════════════════════════════════════
 #  Page Configuration & Custom CSS
@@ -248,7 +249,6 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("##### ⚙️ Configuration")
-    use_llm = st.toggle("🧠 Enable Agentic LLM (Ollama)", value=False, help="Uses local Llama 3.2 to parse intent, fallback to fuzzy matching if offline.")
     
     use_weights = st.toggle("🤖 Pre-trained Weights", value=True, help="Auto-downloads LipNet weights from Hugging Face if no custom file provided.")
     weights_file = None
@@ -257,15 +257,6 @@ with st.sidebar:
             "Custom .pt / .pth checkpoint (Optional)",
             type=["pt", "pth"],
         )
-
-    confidence_threshold = st.slider(
-        "Command confidence threshold",
-        min_value=50,
-        max_value=100,
-        value=70,
-        step=5,
-        help="Minimum score to accept a command.",
-    )
     
     st.markdown("---")
 
@@ -297,42 +288,45 @@ with st.sidebar:
 #  Shared: Render results
 # ══════════════════════════════════════════════════════════════
 def render_results(result, raw_text, preprocess_time=0, inference_time=0, n_frames=0):
-    """Render the command-match results with metrics."""
+    """Render the tool execution results with metrics."""
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
-    if result.is_recognised:
+    if result.tool_name:
         st.markdown(
-            '<span class="badge-success">✓ COMMAND RECOGNISED</span>',
+            '<span class="badge-success">✓ INTENT PARSED</span>',
             unsafe_allow_html=True,
         )
+        
+        # Execute tool mapping OS integrations
+        with st.spinner(f"Executing Agentic Tool: {result.tool_name}..."):
+            exec_res = execute_tool_call(result.tool_name, result.tool_args)
+            
+        exec_status = "✅ " if exec_res["status"] == "success" else "❌ "
+        st.markdown(
+            f"""
+            <div class="command-box">
+                <div class="command-text">
+                    {exec_status} {exec_res['message']}
+                </div>
+                <div class="confidence-text">
+                    Tool Executed: {result.tool_name}({result.tool_args})&nbsp;&nbsp;|&nbsp;&nbsp;
+                    Solver: 🧠 Agentic LLM&nbsp;&nbsp;|&nbsp;&nbsp;
+                    Raw VSR Out: "{raw_text}"
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if result.reasoning:
+            st.info(f"**Agent Reasoning:** {result.reasoning}")
+
     else:
         st.markdown(
             '<span class="badge-fail">✗ NOT RECOGNISED</span>',
             unsafe_allow_html=True,
         )
-
-    method_icon = "🧠" if result.decode_method == "llm" else "🎯"
-    method_name = "Agentic LLM" if result.decode_method == "llm" else "Fuzzy Match"
-    
-    st.markdown(
-        f"""
-        <div class="command-box">
-            <div class="command-text">
-                {result.matched_command}
-            </div>
-            <div class="confidence-text">
-                Confidence: {result.confidence}%&nbsp;&nbsp;|&nbsp;&nbsp;
-                Solver: {method_icon} {method_name}&nbsp;&nbsp;|&nbsp;&nbsp;
-                Raw VSR: "{result.raw_input}"
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if result.decode_method == "llm" and result.llm_reasoning:
-        st.info(f"**Agent Reasoning:** {result.llm_reasoning}")
+        st.error(f"Reason: {result.reasoning}")
 
     # Metrics row
     total_time = preprocess_time + inference_time
@@ -360,31 +354,6 @@ def render_results(result, raw_text, preprocess_time=0, inference_time=0, n_fram
         unsafe_allow_html=True,
     )
 
-    # Top candidates (expandable)
-    if result.all_candidates:
-        with st.expander("🔍 Top fuzzy-match candidates"):
-            for cmd, score in result.all_candidates:
-                bar_color = "#3fb950" if score >= confidence_threshold else "#484f58"
-                st.markdown(
-                    f"""
-                    <div style="display:flex; align-items:center; gap:12px;
-                                margin-bottom:8px;">
-                        <div style="flex:1; color:#e6edf3; font-size:0.9rem;">
-                            {cmd}
-                        </div>
-                        <div style="width:200px; background:#21262d;
-                                    border-radius:4px; height:8px; overflow:hidden;">
-                            <div style="width:{score}%; height:100%;
-                                        background:{bar_color};
-                                        border-radius:4px;"></div>
-                        </div>
-                        <div style="color:#8b949e; font-size:0.82rem; width:40px;
-                                    text-align:right;">{score}%</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -397,7 +366,7 @@ st.markdown(
 )
 st.markdown(
     '<p class="sub-heading">'
-    "Read lips, execute commands — no audio needed. "
+    "Read lips, execute commands natively — no audio needed. "
     "Choose a mode below to get started."
     "</p>",
     unsafe_allow_html=True,
@@ -514,10 +483,11 @@ with tab_upload:
 
                 status.update(label="✅ Inference complete", state="complete")
 
-            # ── Step 3: Intent Decoding ───────────────
-            with st.status("🎯 Matching command…", expanded=True) as status:
-                result = hybrid_decode(raw_text, threshold=confidence_threshold, use_llm=use_llm)
-                status.update(label="✅ Command matched", state="complete")
+            # ── Step 3: Intent Decoding & Agent Execution ───────────────
+            with st.status("🎯 Mapping to tool logic…", expanded=True) as status:
+                st.write("Prompting local Agentic LLM (Ollama) to parse garbled text intent...")
+                result = decode_intent(raw_text)
+                status.update(label="✅ Tool identified", state="complete")
 
             # ── Results ──────────────────────────────────────
             render_results(result, raw_text, preprocess_time, inference_time, len(roi_frames))
@@ -536,30 +506,22 @@ with tab_upload:
                             margin:0 auto;">
                     Record yourself silently mouthing a command, then upload
                     the clip. SilentAssist will extract lip movements, run
-                    visual speech recognition, and match the most likely command.
+                    visual speech recognition, and trigger the native Mac OS tool.
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # ── Available commands ───────────────────────────────
-        st.markdown("##### 📋 Available Commands")
-        cols = st.columns(4)
-        for i, cmd in enumerate(COMMAND_PALETTE):
-            with cols[i % 4]:
-                st.markdown(
-                    f"""
-                    <div style="background:rgba(22,27,34,0.5);
-                                border:1px solid rgba(88,166,255,0.1);
-                                border-radius:8px; padding:10px 14px;
-                                margin-bottom:8px; color:#e6edf3;
-                                font-size:0.85rem;">
-                        {cmd}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        st.markdown("##### 🛠️ Available Agentic Tools")
+        st.markdown("""
+        The LLM Agent automatically maps lip-read inputs to:
+        - `set_volume`, `increase_volume`, `decrease_volume`
+        - `toggle_media` (play/pause Music/Spotify)
+        - `lock_screen` (macOS native lock)
+        - `open_application` (Launches Safari, Maps, etc.)
+        - `emergency_protocol` (Launches Messages)
+        """)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -578,8 +540,8 @@ with tab_live:
             <div style="color:#8b949e; font-size:0.88rem; line-height:1.5;">
                 Start the camera, silently mouth a command, then click
                 <b>"Analyse Captured Frames"</b>. The system collects lip ROI
-                frames in real-time and runs VSR inference on the buffered
-                sequence.
+                frames in real-time. Upon analysis, the Agentic LLM translates the 
+                garbled inference into a physical tool execution on your MacOS device.
             </div>
         </div>
         """,
@@ -600,9 +562,6 @@ with tab_live:
 
     # ── Video frame callback ─────────────────────────────────
     def video_callback(frame: av.VideoFrame) -> av.VideoFrame:
-        """
-        Called for every webcam frame by streamlit-webrtc.
-        """
         img = frame.to_ndarray(format="bgr24")
 
         # Lazy-init the landmarker in the callback thread
@@ -778,10 +737,10 @@ with tab_live:
 
                 status.update(label="✅ Inference complete", state="complete")
 
-            # ── Step 3: Intent Decoding ──────────────────────────
-            with st.status("🎯 Matching command…", expanded=True) as status:
-                result = hybrid_decode(raw_text, threshold=confidence_threshold, use_llm=use_llm)
-                status.update(label="✅ Command matched", state="complete")
+            # ── Step 3: Intent Parsing & Execution ──────────────────────────
+            with st.status("🎯 Mapping into System Command…", expanded=True) as status:
+                result = decode_intent(raw_text)
+                status.update(label="✅ Intent parsed", state="complete")
 
             # ── Results ──────────────────────────────────────
             render_results(result, raw_text, preprocess_time, inference_time, n_captured)
@@ -797,29 +756,11 @@ with tab_live:
                 <b>1.</b> Click <b>"START"</b> to activate your webcam<br>
                 <b>2.</b> Position your face so the <span style="color:#3fb950;">green</span>
                 lip ROI box is visible<br>
-                <b>3.</b> Silently mouth a command (e.g. "Turn on the lights")<br>
+                <b>3.</b> Silently mouth a command (e.g. "Turn down the volume" or "Lock the screen")<br>
                 <b>4.</b> Click <b>"Analyse Captured Frames"</b> to run inference<br>
-                <b>5.</b> The system matches the closest command from the palette
+                <b>5.</b> The Agentic LLM translates the raw output and natively executes the tool!
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    # ── Available commands (compact) ─────────────────────────
-    with st.expander("📋 Available Commands"):
-        cols = st.columns(4)
-        for i, cmd in enumerate(COMMAND_PALETTE):
-            with cols[i % 4]:
-                st.markdown(
-                    f"""
-                    <div style="background:rgba(22,27,34,0.5);
-                                border:1px solid rgba(88,166,255,0.1);
-                                border-radius:8px; padding:8px 12px;
-                                margin-bottom:6px; color:#e6edf3;
-                                font-size:0.82rem;">
-                        {cmd}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
