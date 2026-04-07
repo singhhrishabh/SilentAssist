@@ -39,6 +39,7 @@ COPY app.py .
 COPY model.py .
 COPY processor.py .
 COPY decoder.py .
+COPY executor.py .
 COPY dataset.py .
 COPY train.py .
 
