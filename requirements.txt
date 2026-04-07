@@ -4,28 +4,28 @@
 # ============================================================
 
 # UI
-streamlit>=1.30.0
+streamlit==1.30.0
 
 # Computer Vision & Preprocessing
-opencv-python-headless>=4.8.0
-mediapipe>=0.10.9
+opencv-python-headless==4.8.0.74
+mediapipe==0.10.9
 
 # Deep Learning
 torch==2.2.0
 torchvision==0.17.0
 
 # NLP / Fuzzy Matching
-thefuzz[speedup]>=0.20.0
-python-Levenshtein>=0.23.0
+thefuzz[speedup]==0.20.0
+python-Levenshtein==0.23.0
 
 # Live Camera (WebRTC) + Bugfix for aioice Exception Handler
-streamlit-webrtc>=0.47.0
-av>=14.0.0
-aioice<0.9.0
+streamlit-webrtc==0.47.0
+av==14.2.0
+aioice==0.8.0
 
 # Model Weights Auto-Download
-huggingface_hub>=0.20.0
+huggingface_hub==0.20.0
 
 # Utilities
-numpy>=1.24.0
-Pillow>=10.0.0
+numpy==1.26.4
+Pillow==10.2.0
