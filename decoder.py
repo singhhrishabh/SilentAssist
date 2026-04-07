@@ -82,12 +82,40 @@ def decode_intent(raw_text: str, timeout: int = OLLAMA_TIMEOUT) -> IntentResult:
         )
 
     if not _check_ollama_available():
-        return IntentResult(
-            raw_input=raw_text,
-            tool_name=None,
-            tool_args={},
-            reasoning="Ollama LLM server is offline. Cannot parse intent."
-        )
+        # FALLBACK: Execute string matching if Ollama is not accessible (e.g. Hugging Face Spaces)
+        from thefuzz import process
+        
+        COMMAND_PALETTE = {
+            "increase_volume": ["turn up", "increase volume", "louder", "raise volume"],
+            "decrease_volume": ["turn down", "decrease volume", "quieter", "lower volume"],
+            "toggle_media": ["play music", "pause music", "stop music", "toggle media"],
+            "lock_screen": ["lock screen", "sleep", "lock the computer"],
+            "emergency_protocol": ["help", "emergency", "send message"]
+        }
+        
+        best_match_tool = None
+        best_score = 0
+        
+        for tool, phrases in COMMAND_PALETTE.items():
+            match, score = process.extractOne(cleaned, phrases)
+            if score > best_score:
+                best_score = score
+                best_match_tool = tool
+                
+        if best_score >= 60:
+            return IntentResult(
+                raw_input=raw_text,
+                tool_name=best_match_tool,
+                tool_args={},
+                reasoning=f"Agent offline. Fallback matched via Fuzzy String Logic (Score: {best_score})"
+            )
+        else:
+            return IntentResult(
+                raw_input=raw_text,
+                tool_name=None,
+                tool_args={},
+                reasoning="Ollama LLM server offline. Fallback fuzzy matcher failed to find confident match."
+            )
 
     payload = json.dumps({
         "model": OLLAMA_MODEL,
@@ -121,11 +149,11 @@ def decode_intent(raw_text: str, timeout: int = OLLAMA_TIMEOUT) -> IntentResult:
             raw_input=raw_text,
             tool_name=result_json.get("tool"),
             tool_args=result_json.get("args", {}),
-            reasoning=result_json.get("reasoning", "Parsed successfully.")
+            reasoning=result_json.get("reasoning", "Parsed successfully via Agent LLM.")
         )
 
     except (urllib.error.URLError, json.JSONDecodeError, KeyError, TimeoutError) as e:
-        return IntentResult(
+         return IntentResult(
             raw_input=raw_text,
             tool_name=None,
             tool_args={},
