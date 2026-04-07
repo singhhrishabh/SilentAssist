@@ -38,7 +38,7 @@ jobs:
         python eval.py --ci
         
     - name: Upload Weights Cache (Optional Strategy)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: weights-cache
         path: .weights_cache/
