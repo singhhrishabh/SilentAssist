@@ -86,11 +86,12 @@ def decode_intent(raw_text: str, timeout: int = OLLAMA_TIMEOUT) -> IntentResult:
         from thefuzz import process
         
         COMMAND_PALETTE = {
-            "increase_volume": ["turn up", "increase volume", "louder", "raise volume"],
+            "increase_volume": ["turn up", "increase volume", "louder", "raise volume", "turn on the lights"],
             "decrease_volume": ["turn down", "decrease volume", "quieter", "lower volume"],
-            "toggle_media": ["play music", "pause music", "stop music", "toggle media"],
-            "lock_screen": ["lock screen", "sleep", "lock the computer"],
-            "emergency_protocol": ["help", "emergency", "send message"]
+            "toggle_media": ["play music", "pause music", "stop music", "toggle media", "play some music"],
+            "lock_screen": ["lock screen", "sleep", "lock the computer", "lock the doors"],
+            "emergency_protocol": ["help", "emergency", "send message", "call for help", "send emergency text"],
+            "open_application": ["open the window", "set an alarm"]
         }
         
         best_match_tool = None
