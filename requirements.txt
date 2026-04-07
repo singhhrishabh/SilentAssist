@@ -11,8 +11,8 @@ opencv-python-headless>=4.8.0
 mediapipe>=0.10.9
 
 # Deep Learning
-torch>=2.1.0
-torchvision>=0.16.0
+torch==2.2.0
+torchvision==0.17.0
 
 # NLP / Fuzzy Matching
 thefuzz[speedup]>=0.20.0
