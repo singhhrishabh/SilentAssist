@@ -1,3 +1,12 @@
+---
+title: SilentAssist
+emoji: 🤫
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 8501
+---
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/PyTorch-2.x-red?logo=pytorch&logoColor=white" />
