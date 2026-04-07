@@ -472,7 +472,13 @@ with tab_upload:
                         raw_text = ctc_greedy_decode(log_probs)
                         st.write(f"Used **pre-trained weights** on **{device}**.")
                     else:
-                        st.write("⚠️ No weights found — using **demo stub** output.")
+                        st.info(
+                            "🚨 **NO PYTORCH WEIGHTS DETECTED** 🚨\n\n"
+                            "The system failed to download the 3D-CNN+Bi-GRU parameter weights from Hugging Face `singhhrishabh/silentassist-lipnet-grid`.\n\n"
+                            "**Why is it ignoring your lips?**\n"
+                            "Because PyTorch lacks a 'brain', we are bypassing the neural network to prevent a crash and using a **Deterministic Demo Stub**. It is currently mapping your frames into a random fake demo phrase to simulate the Agent execution.\n\n"
+                            "**How to fix:** Run `train.py` locally on the GRID dataset and upload the resulting `.pt` file to your Hugging Face Space!"
+                        )
                         raw_text = demo_inference(tensor)
 
                 inference_time = time.time() - t1
@@ -734,7 +740,13 @@ with tab_live:
                         raw_text = ctc_greedy_decode(log_probs)
                         st.write(f"Used **pre-trained weights** on **{device}**.")
                     else:
-                        st.write("⚠️ No weights found — using **demo stub** output.")
+                        st.info(
+                            "🚨 **NO PYTORCH WEIGHTS DETECTED** 🚨\n\n"
+                            "The system failed to download the 3D-CNN+Bi-GRU parameter weights from Hugging Face `singhhrishabh/silentassist-lipnet-grid`.\n\n"
+                            "**Why is it ignoring your lips?**\n"
+                            "Because PyTorch lacks a 'brain', we are bypassing the neural network to prevent a crash and using a **Deterministic Demo Stub**. It is currently mapping your frames into a random fake demo phrase to simulate the Agent execution.\n\n"
+                            "**How to fix:** Run `train.py` locally on the GRID dataset and upload the resulting `.pt` file to your Hugging Face Space!"
+                        )
                         raw_text = demo_inference(tensor)
 
                 inference_time = time.time() - t1
