@@ -20,7 +20,7 @@ python-Levenshtein>=0.23.0
 
 # Live Camera (WebRTC) + Bugfix for aioice Exception Handler
 streamlit-webrtc>=0.47.0
-av>=10.0.0
+av>=14.0.0
 aioice<0.9.0
 
 # Model Weights Auto-Download
