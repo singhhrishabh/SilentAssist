@@ -1,0 +1,61 @@
+# ══════════════════════════════════════════════════════════════
+#  SilentAssist — Docker Compose
+# ══════════════════════════════════════════════════════════════
+#  Spin up the full stack:
+#    • silentassist  — Streamlit UI + VSR pipeline
+#    • ollama        — Local LLM for intent parsing (optional)
+# ══════════════════════════════════════════════════════════════
+
+services:
+  # ── SilentAssist Application ─────────────────────────────
+  silentassist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: silentassist
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      # Point the decoder at the Ollama container
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      # Persist model weights cache between restarts
+      - weights_cache:/app/.weights_cache
+      # Mount checkpoints directory for training output
+      - ./checkpoints:/app/checkpoints
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - silentassist-net
+
+  # ── Ollama — Local LLM for Intent Parsing ────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: silentassist-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persist downloaded models between restarts
+      - ollama_data:/root/.ollama
+    # Pull the lightweight model on first startup
+    entrypoint: >
+      sh -c "ollama serve &
+             sleep 5 &&
+             ollama pull llama3.2:1b &&
+             wait"
+    restart: unless-stopped
+    networks:
+      - silentassist-net
+
+volumes:
+  weights_cache:
+  ollama_data:
+
+networks:
+  silentassist-net:
+    driver: bridge

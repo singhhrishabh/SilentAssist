@@ -7,15 +7,19 @@
 ║    • Bi-directional GRU back-end  (temporal modelling)       ║
 ║    • Linear classifier → CTC-decoded text                    ║
 ║                                                              ║
-║  Designed to accept pre-trained LipNet-style weights.        ║
-║  Includes greedy CTC beam decoding for inference.            ║
+║  Features                                                    ║
+║    • Auto-downloads pre-trained weights from Hugging Face    ║
+║    • Apple Silicon (MPS) + CUDA + CPU device allocation      ║
+║    • Greedy CTC decoding for inference                       ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
+import os
 import string
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
 from typing import Optional
 
 # ── Character vocabulary (LipNet convention) ─────────────────
@@ -28,6 +32,90 @@ VOCAB_SIZE = len(VOCAB)            # 29
 
 # Reverse look-up for decoding
 IDX_TO_CHAR = {i: c for i, c in enumerate(VOCAB)}
+
+# ── Hugging Face model repository ────────────────────────────
+HF_REPO_ID = "singhhrishabh/silentassist-lipnet-grid"
+HF_WEIGHT_FILENAME = "silentassist_lipnet_grid.pt"
+_WEIGHTS_CACHE_DIR = Path(__file__).parent / ".weights_cache"
+
+
+# ══════════════════════════════════════════════════════════════
+#  Device Allocation — MPS / CUDA / CPU
+# ══════════════════════════════════════════════════════════════
+def get_device() -> torch.device:
+    """
+    Intelligently select the best available compute device.
+
+    Priority:
+        1. Apple Silicon GPU via Metal Performance Shaders (MPS)
+        2. NVIDIA GPU via CUDA
+        3. CPU fallback
+
+    Returns:
+        torch.device for tensor / model allocation.
+    """
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        # Apple Silicon M1/M2/M3/M4 — massive speedup for 3D convolutions
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+
+# ══════════════════════════════════════════════════════════════
+#  Hugging Face Weight Download Utility
+# ══════════════════════════════════════════════════════════════
+def download_weights_from_hf(
+    repo_id: str = HF_REPO_ID,
+    filename: str = HF_WEIGHT_FILENAME,
+    cache_dir: Optional[Path] = None,
+) -> Optional[str]:
+    """
+    Download pre-trained model weights from Hugging Face Hub.
+
+    Uses huggingface_hub's hf_hub_download to fetch and cache the
+    .pt checkpoint. On subsequent runs, returns the cached path
+    instantly without re-downloading.
+
+    Args:
+        repo_id:   Hugging Face repository (e.g. "user/model-name").
+        filename:  Name of the weight file inside the repo.
+        cache_dir: Local directory for caching. Defaults to
+                   .weights_cache/ next to this script.
+
+    Returns:
+        Absolute path to the downloaded .pt file, or None on failure.
+    """
+    if cache_dir is None:
+        cache_dir = _WEIGHTS_CACHE_DIR
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        path = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            cache_dir=str(cache_dir),
+            local_dir=str(cache_dir),
+            local_dir_use_symlinks=False,
+        )
+        print(f"[SilentAssist] Weights cached at: {path}")
+        return path
+
+    except ImportError:
+        print(
+            "[SilentAssist] huggingface_hub not installed. "
+            "Install with: pip install huggingface_hub"
+        )
+        return None
+
+    except Exception as e:
+        print(f"[SilentAssist] Failed to download weights from HF: {e}")
+        print("[SilentAssist] Falling back to demo stub mode.")
+        return None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -101,8 +189,7 @@ class SilentAssistNet(nn.Module):
 
         self.frontend = SpatiotemporalFrontEnd()
 
-        # We compute the flattened spatial size dynamically in forward()
-        # but also cache it here for the Linear layer initialisation.
+        # Flattened spatial size after 3 conv blocks:
         # For input (1, 1, 75, 64, 128):
         #   after conv1: (1, 32, 75, 16, 32)
         #   after conv2: (1, 64, 75,  8, 16)
@@ -150,30 +237,51 @@ class SilentAssistNet(nn.Module):
 # ══════════════════════════════════════════════════════════════
 #  Model Loading Utilities
 # ══════════════════════════════════════════════════════════════
-def load_model(weights_path: Optional[str] = None) -> SilentAssistNet:
+def load_model(
+    weights_path: Optional[str] = None,
+    device: Optional[torch.device] = None,
+    auto_download: bool = True,
+) -> SilentAssistNet:
     """
-    Instantiate the model and optionally load pre-trained weights.
+    Instantiate the model and load pre-trained weights.
+
+    Resolution order for weights:
+        1. Explicit *weights_path* if provided
+        2. Auto-download from Hugging Face Hub (if *auto_download*)
+        3. Fall back to random initialisation (demo stub mode)
 
     Args:
-        weights_path:  Path to a .pt / .pth checkpoint.  If None the
-                       model is returned with random initialisation
-                       (demo / stub mode).
+        weights_path:   Path to a .pt / .pth checkpoint.
+        device:         Target device. Auto-detected if None.
+        auto_download:  Whether to attempt HF download if no path given.
 
     Returns:
-        model in eval mode on CPU.
+        Model in eval mode on the target device.
     """
+    if device is None:
+        device = get_device()
+
     model = SilentAssistNet()
 
-    if weights_path is not None:
-        state = torch.load(weights_path, map_location="cpu", weights_only=True)
+    # ── Resolve weights ──────────────────────────────────────
+    resolved_path = weights_path
+
+    if resolved_path is None and auto_download:
+        resolved_path = download_weights_from_hf()
+
+    if resolved_path is not None and os.path.isfile(resolved_path):
+        state = torch.load(resolved_path, map_location="cpu", weights_only=True)
         # Support both raw state_dict and {"model_state_dict": ...} format
         if "model_state_dict" in state:
             state = state["model_state_dict"]
         model.load_state_dict(state, strict=False)
-        print(f"[SilentAssist] Loaded weights from {weights_path}")
+        print(f"[SilentAssist] Loaded weights from {resolved_path}")
+        print(f"[SilentAssist] Device: {device}")
     else:
-        print("[SilentAssist] No weights provided — running in DEMO stub mode.")
+        print("[SilentAssist] No weights available — running in DEMO stub mode.")
+        print(f"[SilentAssist] Device: {device}")
 
+    model = model.to(device)
     model.eval()
     return model
 
@@ -191,6 +299,9 @@ def ctc_greedy_decode(log_probs: torch.Tensor) -> str:
     Returns:
         Decoded text string with collapsed repeats and blanks removed.
     """
+    # Move to CPU for decoding
+    log_probs = log_probs.detach().cpu()
+
     # Argmax along vocab axis → (T,)
     indices = torch.argmax(log_probs.squeeze(0), dim=-1).tolist()
 
@@ -226,6 +337,5 @@ def demo_inference(tensor: torch.Tensor) -> str:
     a hash of the input tensor — used when no trained weights
     are available so the demo pipeline still runs end-to-end.
     """
-    # Use the sum of the tensor as a simple hash seed
     seed = int(tensor.sum().item() * 1000) % len(_DEMO_PHRASES)
     return _DEMO_PHRASES[seed]

@@ -1,6 +1,6 @@
 # ============================================================
 # SilentAssist — Visual Speech Recognition Silent Voice Assistant
-# Hackathon MVP Dependencies
+# Dependencies
 # ============================================================
 
 # UI
@@ -21,6 +21,9 @@ python-Levenshtein>=0.23.0
 # Live Camera (WebRTC)
 streamlit-webrtc>=0.47.0
 av>=10.0.0
+
+# Model Weights Auto-Download
+huggingface_hub>=0.20.0
 
 # Utilities
 numpy>=1.24.0

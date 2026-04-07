@@ -11,6 +11,7 @@ Launch:
     streamlit run app.py
 """
 
+import os
 import streamlit as st
 import torch
 import time
@@ -31,8 +32,8 @@ from processor import (
     get_landmarker,
     MAX_FRAMES,
 )
-from model import load_model, ctc_greedy_decode, demo_inference
-from decoder import fuzzy_decode, COMMAND_PALETTE
+from model import load_model, get_device, ctc_greedy_decode, demo_inference
+from decoder import hybrid_decode, COMMAND_PALETTE
 
 # ══════════════════════════════════════════════════════════════
 #  Page Configuration & Custom CSS
@@ -246,50 +247,14 @@ with st.sidebar:
     )
     st.markdown("---")
 
-    st.markdown("##### 🎯 Use Cases")
-
-    USE_CASES = [
-        (
-            "♿  Accessibility",
-            "Empowers individuals with speech impairments to "
-            "control devices using only lip movements — no voice required.",
-        ),
-        (
-            "🔊  Loud Environments",
-            "Factory floors, concerts, and construction sites where "
-            "audio-based assistants are completely unreliable.",
-        ),
-        (
-            "🔒  Privacy & Stealth",
-            "Sensitive environments — hospitals, courtrooms, libraries "
-            "— where speaking aloud is inappropriate or insecure.",
-        ),
-        (
-            "🎖️  Tactical / Military",
-            "Silent command execution for field operatives where "
-            "audible speech could compromise a mission.",
-        ),
-    ]
-
-    for title, desc in USE_CASES:
-        st.markdown(
-            f"""
-            <div class="usecase-card">
-                <div class="usecase-title">{title}</div>
-                <div class="usecase-desc">{desc}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("---")
-
     st.markdown("##### ⚙️ Configuration")
-    use_weights = st.toggle("Load pre-trained weights", value=False)
+    use_llm = st.toggle("🧠 Enable Agentic LLM (Ollama)", value=False, help="Uses local Llama 3.2 to parse intent, fallback to fuzzy matching if offline.")
+    
+    use_weights = st.toggle("🤖 Pre-trained Weights", value=True, help="Auto-downloads LipNet weights from Hugging Face if no custom file provided.")
     weights_file = None
     if use_weights:
         weights_file = st.file_uploader(
-            "Upload .pt / .pth checkpoint",
+            "Custom .pt / .pth checkpoint (Optional)",
             type=["pt", "pth"],
         )
 
@@ -299,9 +264,23 @@ with st.sidebar:
         max_value=100,
         value=70,
         step=5,
-        help="Minimum fuzzy-match score to accept a command.",
+        help="Minimum score to accept a command.",
     )
+    
+    st.markdown("---")
 
+    st.markdown("##### 🎯 Hardware")
+    # Show active device
+    device_info = str(get_device()).upper()
+    if device_info == "MPS":
+        device_display = "🍏 Apple Silicon (MPS)"
+    elif device_info == "CUDA":
+        device_display = "🟢 NVIDIA (CUDA)"
+    else:
+        device_display = "💻 CPU"
+        
+    st.markdown(f"<div style='color: #8b949e; font-size: 0.9rem;'>Active Device: <b>{device_display}</b></div>", unsafe_allow_html=True)
+    
     st.markdown("---")
     st.markdown(
         """
@@ -333,20 +312,27 @@ def render_results(result, raw_text, preprocess_time=0, inference_time=0, n_fram
             unsafe_allow_html=True,
         )
 
+    method_icon = "🧠" if result.decode_method == "llm" else "🎯"
+    method_name = "Agentic LLM" if result.decode_method == "llm" else "Fuzzy Match"
+    
     st.markdown(
         f"""
         <div class="command-box">
             <div class="command-text">
-                {"⚡ " if result.is_recognised else "❓ "}{result.matched_command}
+                {result.matched_command}
             </div>
             <div class="confidence-text">
                 Confidence: {result.confidence}%&nbsp;&nbsp;|&nbsp;&nbsp;
+                Solver: {method_icon} {method_name}&nbsp;&nbsp;|&nbsp;&nbsp;
                 Raw VSR: "{result.raw_input}"
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    if result.decode_method == "llm" and result.llm_reasoning:
+        st.info(f"**Agent Reasoning:** {result.llm_reasoning}")
 
     # Metrics row
     total_time = preprocess_time + inference_time
@@ -375,28 +361,29 @@ def render_results(result, raw_text, preprocess_time=0, inference_time=0, n_fram
     )
 
     # Top candidates (expandable)
-    with st.expander("🔍 Top fuzzy-match candidates"):
-        for cmd, score in result.all_candidates:
-            bar_color = "#3fb950" if score >= confidence_threshold else "#484f58"
-            st.markdown(
-                f"""
-                <div style="display:flex; align-items:center; gap:12px;
-                            margin-bottom:8px;">
-                    <div style="flex:1; color:#e6edf3; font-size:0.9rem;">
-                        {cmd}
+    if result.all_candidates:
+        with st.expander("🔍 Top fuzzy-match candidates"):
+            for cmd, score in result.all_candidates:
+                bar_color = "#3fb950" if score >= confidence_threshold else "#484f58"
+                st.markdown(
+                    f"""
+                    <div style="display:flex; align-items:center; gap:12px;
+                                margin-bottom:8px;">
+                        <div style="flex:1; color:#e6edf3; font-size:0.9rem;">
+                            {cmd}
+                        </div>
+                        <div style="width:200px; background:#21262d;
+                                    border-radius:4px; height:8px; overflow:hidden;">
+                            <div style="width:{score}%; height:100%;
+                                        background:{bar_color};
+                                        border-radius:4px;"></div>
+                        </div>
+                        <div style="color:#8b949e; font-size:0.82rem; width:40px;
+                                    text-align:right;">{score}%</div>
                     </div>
-                    <div style="width:200px; background:#21262d;
-                                border-radius:4px; height:8px; overflow:hidden;">
-                        <div style="width:{score}%; height:100%;
-                                    background:{bar_color};
-                                    border-radius:4px;"></div>
-                    </div>
-                    <div style="color:#8b949e; font-size:0.82rem; width:40px;
-                                text-align:right;">{score}%</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    """,
+                    unsafe_allow_html=True,
+                )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -421,6 +408,11 @@ st.markdown(
 # ══════════════════════════════════════════════════════════════
 tab_upload, tab_live = st.tabs(["📹  Video Upload", "📷  Live Camera"])
 
+# Helper for inference
+@st.cache_resource(show_spinner=False)
+def get_cached_model(weights_path=None, auto_download=True):
+    device = get_device()
+    return load_model(weights_path=weights_path, device=device, auto_download=auto_download), device
 
 # ──────────────────────────────────────────────────────────────
 #  TAB 1: Video Upload Mode
@@ -492,22 +484,27 @@ with tab_upload:
 
                 weights_path = None
                 if use_weights and weights_file is not None:
-                    import tempfile, os
+                    import tempfile
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
                     tmp.write(weights_file.read())
                     tmp.flush()
                     weights_path = tmp.name
 
-                model = load_model(weights_path)
+                model, device = get_cached_model(weights_path=weights_path, auto_download=use_weights)
 
                 with torch.no_grad():
-                    if weights_path is not None:
+                    # Check if model has valid weights loaded
+                    is_demo = sum(p.sum().item() for p in model.parameters()) == sum(p.sum().item() for p in get_cached_model(auto_download=False)[0].parameters())
+                    
+                    if not is_demo or (weights_path is None and not use_weights):
+                        # Move tensor to correct device
+                        tensor = tensor.to(device)
                         log_probs = model(tensor)
                         raw_text = ctc_greedy_decode(log_probs)
-                        st.write("Used **pre-trained weights** for inference.")
+                        st.write(f"Used **pre-trained weights** on **{device}**.")
                     else:
+                        st.write("⚠️ No weights found — using **demo stub** output.")
                         raw_text = demo_inference(tensor)
-                        st.write("⚠️ No weights loaded — using **demo stub** output.")
 
                 inference_time = time.time() - t1
                 st.write(f"Raw VSR output: `{raw_text}`")
@@ -517,9 +514,9 @@ with tab_upload:
 
                 status.update(label="✅ Inference complete", state="complete")
 
-            # ── Step 3: Fuzzy Command Matching ───────────────
+            # ── Step 3: Intent Decoding ───────────────
             with st.status("🎯 Matching command…", expanded=True) as status:
-                result = fuzzy_decode(raw_text, threshold=confidence_threshold)
+                result = hybrid_decode(raw_text, threshold=confidence_threshold, use_llm=use_llm)
                 status.update(label="✅ Command matched", state="complete")
 
             # ── Results ──────────────────────────────────────
@@ -590,8 +587,6 @@ with tab_live:
     )
 
     # ── Shared state for the WebRTC callback ─────────────────
-    # We use a thread-safe deque to accumulate lip ROI frames
-    # from the WebRTC video callback thread.
     if "live_roi_buffer" not in st.session_state:
         st.session_state.live_roi_buffer = deque(maxlen=MAX_FRAMES)
     if "live_frame_count" not in st.session_state:
@@ -607,8 +602,6 @@ with tab_live:
     def video_callback(frame: av.VideoFrame) -> av.VideoFrame:
         """
         Called for every webcam frame by streamlit-webrtc.
-        Runs MediaPipe lip detection, buffers ROIs, and returns
-        an annotated frame with lip contour overlay.
         """
         img = frame.to_ndarray(format="bgr24")
 
@@ -756,22 +749,26 @@ with tab_live:
 
                 weights_path = None
                 if use_weights and weights_file is not None:
-                    import tempfile, os
+                    import tempfile
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
                     tmp.write(weights_file.read())
                     tmp.flush()
                     weights_path = tmp.name
 
-                model = load_model(weights_path)
+                model, device = get_cached_model(weights_path=weights_path, auto_download=use_weights)
 
                 with torch.no_grad():
-                    if weights_path is not None:
+                    is_demo = sum(p.sum().item() for p in model.parameters()) == sum(p.sum().item() for p in get_cached_model(auto_download=False)[0].parameters())
+                    
+                    if not is_demo or (weights_path is None and not use_weights):
+                        # Move to correct device
+                        tensor = tensor.to(device)
                         log_probs = model(tensor)
                         raw_text = ctc_greedy_decode(log_probs)
-                        st.write("Used **pre-trained weights** for inference.")
+                        st.write(f"Used **pre-trained weights** on **{device}**.")
                     else:
+                        st.write("⚠️ No weights found — using **demo stub** output.")
                         raw_text = demo_inference(tensor)
-                        st.write("⚠️ No weights loaded — using **demo stub** output.")
 
                 inference_time = time.time() - t1
                 st.write(f"Raw VSR output: `{raw_text}`")
@@ -781,9 +778,9 @@ with tab_live:
 
                 status.update(label="✅ Inference complete", state="complete")
 
-            # ── Step 3: Fuzzy match ──────────────────────────
+            # ── Step 3: Intent Decoding ──────────────────────────
             with st.status("🎯 Matching command…", expanded=True) as status:
-                result = fuzzy_decode(raw_text, threshold=confidence_threshold)
+                result = hybrid_decode(raw_text, threshold=confidence_threshold, use_llm=use_llm)
                 status.update(label="✅ Command matched", state="complete")
 
             # ── Results ──────────────────────────────────────

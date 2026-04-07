@@ -3,7 +3,8 @@
   <img src="https://img.shields.io/badge/PyTorch-2.x-red?logo=pytorch&logoColor=white" />
   <img src="https://img.shields.io/badge/Streamlit-1.30+-FF4B4B?logo=streamlit&logoColor=white" />
   <img src="https://img.shields.io/badge/MediaPipe-0.10+-00A67E?logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/License-MIT-green" />
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" />
+  <img src="https://img.shields.io/badge/Ollama-LLM-white?logo=ollama&logoColor=black" />
 </p>
 
 <h1 align="center">🤫 SilentAssist</h1>
@@ -16,98 +17,89 @@
 
 ## 🎯 What Is SilentAssist?
 
-**SilentAssist** is a Visual Speech Recognition (VSR) assistant that reads a user's lip movements via camera to execute commands or send messages, **strictly bypassing all audio data**. It is designed for:
+**SilentAssist** is a Visual Speech Recognition (VSR) assistant that reads a user's lip movements via camera to execute commands or send messages, **strictly bypassing all audio data**. 
 
-| Use Case | Description |
-|----------|-------------|
-| ♿ **Accessibility** | Empowers individuals with speech impairments to control devices using only lip movements |
-| 🔊 **Loud Environments** | Factory floors, concerts, construction sites where audio assistants fail |
-| 🔒 **Privacy & Stealth** | Hospitals, courtrooms, libraries — where speaking aloud is inappropriate |
-| 🎖️ **Tactical** | Silent command execution for field operatives |
+It is designed for:
+- ♿ **Accessibility** — Empowers individuals with speech impairments to control devices.
+- 🔊 **Loud Environments** — Factory floors, concerts, and construction sites.
+- 🔒 **Privacy & Stealth** — Hospitals, courtrooms, libraries.
+- 🎖️ **Tactical** — Silent command execution for field operatives.
 
-## ⚡ Features
+## ⚡ Key Upgrades (V2)
 
-- **📹 Video Upload Mode** — Upload a `.mp4` video and analyse lip movements offline
-- **📷 Live Camera Mode** — Real-time lip reading from your webcam with live ROI extraction and command matching
-- **🧠 Neural Network** — Spatiotemporal 3D-CNN + Bi-GRU with CTC decoding (accepts pre-trained LipNet/AV-HuBERT weights)
-- **🎯 Fuzzy Command Matching** — Robust to VSR homophene noise via `thefuzz` token sort ratio
-- **🌙 Dark-Themed UI** — Polished glassmorphism design with gradient accents
+- **🤖 Hybrid Intent Parsing** — Pipes raw CTC text into a local LLM via `Ollama` (Llama 3.2 1B) for semantic intent extraction. Highly robust to homophene noise. Falls back to fuzzy matching (`thefuzz`) if offline.
+- **⚡ Apple Silicon Optimization** — Uses `torch.backends.mps` to accelerate 3D-CNN and RNN inference on modern Mac hardware.
+- **🤗 Hub Auto-Download** — Frictionless setup. Automatically fetches pre-trained LipNet weights off Hugging Face if no checkpoint is manually provided.
+- **🎓 Complete Training Pipeline** — Full data locators and PyTorch `train.py` script featuring CTC loss, mixed-precision, and Word Error Rate (WER) / Character Error Rate (CER) tracking.
+- **🐳 Docker Containerization** — Ships with `Dockerfile` and `docker-compose.yml` encapsulating all OpenCV system dependencies (libGL) alongside the app.
 
 ## 🏗️ Architecture
 
 ```
-┌──────────────┐     ┌─────────────────┐     ┌───────────────┐     ┌──────────────┐
-│  Video/Camera│────▶│  processor.py   │────▶│   model.py    │────▶│  decoder.py  │
-│   Input      │     │  MediaPipe Face │     │  3D-CNN +     │     │  thefuzz     │
-│              │     │  Landmarker     │     │  Bi-GRU + CTC │     │  Fuzzy Match │
-└──────────────┘     │  → Lip ROI      │     │  → Raw Text   │     │  → Command   │
-                     └─────────────────┘     └───────────────┘     └──────────────┘
+┌──────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌───────────────┐
+│  Video Input │───▶│  processor.py   │───▶│    model.py     │───▶│  decoder.py   │
+│  (or WebRTC) │    │ MediaPipe Face  │    │ 3D-CNN + Bi-GRU │    │  Ollama LLM   │
+│   Webcam     │    │ → ROI Bounding  │    │ → CTC Logits    │    │ → Intent JSON │
+└──────────────┘    └─────────────────┘    └─────────────────┘    └───────────────┘
+                                                    │
+                                                    ▼
+                                           ┌─────────────────┐
+                                           │    dataset.py   │
+                                           │    train.py     │
+                                           └─────────────────┘
 ```
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Local)
 
 ```bash
-# Clone the repository
 git clone https://github.com/singhhrishabh/SilentAssist.git
 cd SilentAssist
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Download MediaPipe face model (auto-downloads if missing)
-# Or manually:
-curl -L -o face_landmarker.task \
-  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+# (Optional) Start Ollama for Agentic LLM parsing
+ollama serve &
+ollama pull llama3.2:1b
 
-# Launch the app
+# Launch the Streamlit app
 streamlit run app.py
 ```
 
-## 📂 Project Structure
+## 🐳 Quick Start (Docker Compose)
 
+The easiest way to run SilentAssist without worrying about system dependencies. It will automatically orchestrate the Streamlit app and the Ollama server.
+
+```bash
+docker-compose up --build -d
 ```
-SilentAssist/
-├── app.py              # Streamlit UI — video upload + live camera modes
-├── processor.py        # MediaPipe lip ROI extraction pipeline
-├── model.py            # 3D-CNN + Bi-GRU spatiotemporal network + CTC decode
-├── decoder.py          # Fuzzy command matching (thefuzz)
-├── requirements.txt    # Pinned dependencies
-└── face_landmarker.task  # MediaPipe model bundle (downloaded at setup)
+The app will be available at `http://localhost:8501`.
+
+## 🎓 Training Pipeline
+
+To train your own model or fine-tune on the **GRID corpus**:
+1. Download a dataset or structure custom videos into a folder.
+2. Run the `train.py` script:
+
+```bash
+# Example: Train on standard GRID dataset
+python train.py --data_root /path/to/grid --dataset_type grid --epochs 50 --batch_size 8
+
+# Example: Train on custom folder of videos + labels
+python train.py --data_root /path/to/custom --dataset_type folder --labels_file labels.txt
 ```
+Checkpoints and logs (including CER/WER metrics) will be saved in the `./checkpoints/` directory.
 
-## 📋 Available Commands
+## 🔧 Model Configuration
 
-The system recognises 20 pre-defined commands via fuzzy matching:
+SilentAssist checks `torch.backends.mps.is_available()` on macOS, defaulting to GPU acceleration if permitted, else CUDA or CPU.
 
-| | | | |
-|---|---|---|---|
-| Turn on the lights | Turn off the lights | Call for help | Send emergency text |
-| Lock the doors | Unlock the doors | Open the window | Close the window |
-| Play some music | Stop the music | Set an alarm | Cancel the alarm |
-| Take a screenshot | Read my messages | Start recording | Stop recording |
-| Call an ambulance | Increase the volume | Decrease the volume | Navigate home |
+### Using Default Weights
+We host a baseline checkpoint trained loosely on the GRID dataset. If the *Pre-trained Weights* toggle is on and you didn't upload a custom file, passing `auto_download=True` automatically downloads the checkpoint from `singhhrishabh/silentassist-lipnet-grid` to a local `.weights_cache/` directory.
 
-## 🔧 Using Pre-Trained Weights
+### Demo Mode
+If the weights toggle is disabled, SilentAssist falls back to a deterministic **Demo Stub** for purely showcasing the system UI end-to-end.
 
-SilentAssist is designed to accept pre-trained LipNet or AV-HuBERT weights:
+## 📄 License & Credits
 
-1. Toggle **"Load pre-trained weights"** in the sidebar
-2. Upload your `.pt` / `.pth` checkpoint file
-3. The model will load the weights and run real inference with CTC decoding
-
-Without weights, the app runs in **demo mode** with a deterministic stub for end-to-end pipeline demonstration.
-
-## 🛠️ Tech Stack
-
-- **UI**: [Streamlit](https://streamlit.io) + [streamlit-webrtc](https://github.com/whitphx/streamlit-webrtc)
-- **Computer Vision**: [OpenCV](https://opencv.org) + [MediaPipe](https://ai.google.dev/edge/mediapipe)
-- **Deep Learning**: [PyTorch](https://pytorch.org) (3D-CNN + Bi-GRU + CTC)
-- **NLP**: [thefuzz](https://github.com/seatgeek/thefuzz) (Fuzzy string matching)
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">Built with ❤️ for the 24-hr Hackathon</p>
+MIT License — Built over a 24-hr open-environment hackathon runtime.
